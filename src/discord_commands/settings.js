@@ -90,7 +90,7 @@ function createPromptContentForCategory(category, iconUri) {
   };
 }
 
-async function createPromptContentForSetting(msg, settings, setting, iconUri) {
+async function createPromptContentForSetting(commanderMsg, settings, setting, iconUri) {
   return {
     embed: {
       title: `Settings (${setting.userFacingName})`,
@@ -106,12 +106,16 @@ async function createPromptContentForSetting(msg, settings, setting, iconUri) {
           value: setting.userSetting ? 'Anyone' : 'Server admin',
         },
         {
+          name: 'Shortcut',
+          value: `You can get back to this setting quickly by saying **${commanderMsg.prefix}${ALIASES[0]} ${setting.path.map(x => x + 1).join(' ')}**`,
+        },
+        {
           name: 'Current value',
           value: await settings.getUserFacingSettingValue(
             setting.uniqueId,
-            msg.channel.guild ? msg.channel.guild.id : msg.channel.id,
-            msg.channel.id,
-            msg.author.id,
+            commanderMsg.channel.guild ? commanderMsg.channel.guild.id : commanderMsg.channel.id,
+            commanderMsg.channel.id,
+            commanderMsg.author.id,
           ),
         },
       ],
@@ -127,17 +131,52 @@ function tryApplySetting() {
   return Promise.resolve(); // TODO
 }
 
-async function showSettingNode(monochrome, msg, node) {
+function tryHandleCancel(commanderMsg, responseContent) {
+  if (responseContent === 'cancel') {
+    return commanderMsg.channel.createMessage('The settings menu has been closed.');
+  }
+
+  return false;
+}
+
+function tryHandleBack(monochrome, commanderMsg, responseContent, node) {
+  if (responseContent === 'back' && node.parent) {
+    return showCategoryNode(monochrome, commanderMsg, node.parent);
+  }
+
+  return false;
+}
+
+async function showSettingNode(monochrome, commanderMsg, node) {
   assert(!node.children, 'Expected node to be a leaf');
   const iconUri = monochrome.getSettingsIconUri();
   const promptContent = await createPromptContentForSetting(
-    msg,
+    commanderMsg,
     monochrome.getSettings(),
     node,
     iconUri,
   );
 
-  await msg.channel.createMessage(promptContent);
+  await commanderMsg.channel.createMessage(promptContent);
+
+  while (true) {
+    const response = await monochrome.waitForMessage(
+      INPUT_TIMEOUT_MS,
+      candidateMsg =>
+        commanderMsg.author.id === candidateMsg.author.id
+          && commanderMsg.channel.id === candidateMsg.channel.id,
+    );
+
+    const handledCanceled = await tryHandleCancel(commanderMsg, response.content);
+    if (handledCanceled) {
+      return handledCanceled;
+    }
+
+    const handledBack = await tryHandleBack(monochrome, commanderMsg, response.content, node);
+    if (handledBack) {
+      return handledBack;
+    }
+  }
 }
 
 function childIndexFromString(str) {
