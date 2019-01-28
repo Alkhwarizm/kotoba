@@ -140,8 +140,12 @@ function tryHandleCancel(commanderMsg, responseContent) {
 }
 
 function tryHandleBack(monochrome, commanderMsg, responseContent, node) {
-  if (responseContent === 'back' && node.parent) {
-    return showCategoryNode(monochrome, commanderMsg, node.parent);
+  if (responseContent === 'back') {
+    if (node.parent) {
+      return showCategoryNode(monochrome, commanderMsg, node.parent);
+    } else {
+      return commanderMsg.channel.createMessage('The settings menu has been closed.');
+    }
   }
 
   return false;
@@ -183,7 +187,7 @@ function childIndexFromString(str) {
   return parseInt(str, 10) - 1;
 }
 
-async function showCategoryNode(monochrome, msg, node) {
+async function showCategoryNode(monochrome, commanderMsg, node) {
   const iconUri = monochrome.getSettingsIconUri();
 
   let { children } = node;
@@ -195,21 +199,31 @@ async function showCategoryNode(monochrome, msg, node) {
     promptContent = createPromptContentForRoot(children, iconUri);
   }
 
-  await msg.channel.createMessage(promptContent);
+  await commanderMsg.channel.createMessage(promptContent);
 
   const response = await monochrome.waitForMessage(INPUT_TIMEOUT_MS, (candidateMsg) => {
     const childIndex = childIndexFromString(candidateMsg.content);
-    return candidateMsg.author.id === msg.author.id
-      && candidateMsg.channel.id === msg.channel.id
-      && (children[childIndex] || msg.content === 'cancel' || msg.content === 'back');
+    return candidateMsg.author.id === commanderMsg.author.id
+      && candidateMsg.channel.id === commanderMsg.channel.id
+      && (children[childIndex]
+          || candidateMsg.content === 'cancel'
+          || candidateMsg.content === 'back');
   });
 
-  // TODO: Handle back and cancel.
+  const handledCanceled = await tryHandleCancel(commanderMsg, response.content);
+  if (handledCanceled) {
+    return handledCanceled;
+  }
+
+  const handledBack = await tryHandleBack(monochrome, commanderMsg, response.content, node);
+  if (handledBack) {
+    return handledBack;
+  }
 
   const childIndex = childIndexFromString(response.content);
   const childNode = children[childIndex];
 
-  return showNode(monochrome, msg, childNode);
+  return showNode(monochrome, commanderMsg, childNode);
 }
 
 function showNode(monochrome, msg, node) {
