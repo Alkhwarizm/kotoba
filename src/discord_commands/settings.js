@@ -6,6 +6,7 @@ const { PublicError } = require('monochrome-bot');
 const EMBED_COLOR = 2522111;
 const INPUT_TIMEOUT_MS = 180000;
 const ALIASES = ['settings', 'setting'];
+const ALIASES_FOR_HELP = ['settings'];
 const HELP_SHORT_DESCRIPTION = 'Configure my settings.';
 const HELP_LONG_DESCRIPTION = 'Configure my settings. Server admins can configure my default settings on their server. Users can configure user settings.';
 
@@ -393,6 +394,7 @@ function execute(monochrome, msg, args) {
 
 module.exports = {
   commandAliases: ALIASES,
+  aliasesForHelp: ALIASES_FOR_HELP,
   uniqueId: 'settings',
   canBeChannelRestricted: false,
   shortDescription: HELP_SHORT_DESCRIPTION,
