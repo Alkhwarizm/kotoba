@@ -140,132 +140,103 @@ async function tryApplyChannelSetting(monochrome, commanderMsg, settingNode, new
 
 }
 
-function createLocationPromptString(settingNode, isDm) {
-  if (settingNode.serverSetting && settingNode.userSetting && settingNode.channelSetting) {
-    return `Where should the new setting be applied? You can say **${Location.ME}**, **${Location.THIS_SERVER}**, **${Location.THIS_CHANNEL}**, or list channels, for example: **#general #bot #quiz**. You can also say **${CANCEL}** or **${BACK}**.`;
-  }
-  if (settingNode.serverSetting && settingNode.channelSetting) {
-    return `Where should the new setting be applied? You can say **${Location.THIS_SERVER}**, **${Location.THIS_CHANNEL}**, or list channels, for example: **#general #bot #quiz**. You can also say **${CANCEL}** or **${BACK}**.`;
-  }
-  if (settingNode.serverSetting && settingNode.userSetting) {
-    return `Where should the new setting be applied? You can say **${Location.ME}** or **${Location.THIS_SERVER}**. You can also say **${CANCEL}** or **${BACK}**.`;
-  }
-  if (settingNode.userSetting && settingNode.channelSetting) {
-    return `Where should the new setting be applied? You can say **${Location.ME}**, **${Location.THIS_CHANNEL}**, or list channels, for example: **#general #bot #quiz**. You can also say **${CANCEL}** or **${BACK}**.`;
-  }
-  if (settingNode.userSetting) {
-    throw new Error('If the setting is only a user setting, we shouldn\'t be prompting for location.');
-  }
-  if (settingNode.serverSetting) {
-    throw new Error('If the setting is only a server setting, we shouldn\'t be prompting for location.');
-  }
-  if (settingNode.channelSetting) {
-    return `Where should the new setting be applied? You can say **${Location.THIS_CHANNEL}**, or list channels, for example: **#general #bot #quiz**. You can also say **${CANCEL}** or **${BACK}**.`;
-  }
-  throw new Error('Unexpected fallthrough');
-}
-
-function msgContextMatches(msg1, msg2) {
-  return msg1.author.id === msg2.author.id && msg1.channel.id === msg2.channel.id;
-}
-
-function getInvalidChannelId(channelIds, commanderMsg) {
-  return channelIds.find(channelId => {
-    if (!commanderMsg.channel.guild) {
-      return channelId !== commanderMsg.channel.id;
-    }
-
-    return !commanderMsg.channel.guild.channels.get(channelId);
-  });
-}
-
-async function getUpdateSettingDelegate(monochrome, commanderMsg, settingNode, userIsServerAdmin) {
-  if (!userIsServerAdmin) {
-    return tryApplyUserSetting;
-  }
-  if (settingNode.userSetting && !settingNode.channelSetting && !settingNode.serverSetting) {
-    return tryApplyUserSetting;
-  }
-  if (settingNode.serverSetting && !settingNode.channelSetting && !settingNode.userSetting) {
-    return tryApplyServerSetting;
-  }
-  if (settingNode.channelSetting && !settingNode.serverSetting && !settingNode.userSetting) {
-    await commanderMsg.channel.createMessage('What channels should the new setting apply to? You can say **this channel**, or list channels, for example: **#general #bot #quiz**. You can also say **${CANCEL}** or **${BACK}**.');
-
-    while (true) {
-      const response = await monochrome.waitForMessage(
-        INPUT_TIMEOUT_MS,
-        (candidateMsg) => msgContextMatches(candidateMsg, commanderMsg),
-      );
-
-      const handledCanceled = await tryHandleCancel(commanderMsg, response.content);
-      if (handledCanceled) {
-        return handledCanceled;
-      }
-
-      const handledBack = await tryHandleBack(monochrome, commanderMsg, response.content, settingNode);
-      if (handledBack) {
-        return handledBack;
-      }
-
-      const channelIds = [];
-      if (response.content.toLowerCase() === 'this channel') {
-        channelIds.push(commanderMsg.channel.id);
-      } else {
-        channelIds.push(...response.content.split(' ')
-          .filter(s => s.trim())
-          .map(s => s.replace(/<#(.*?)>/, (match, group1) => group1)));
-      }
-
-      const invalidChannelId = getInvalidChannelId(channelIds, commanderMsg);
-      if (invalidChannelId) {
-        await msg.channel.createMessage(`I didn't find the channel: **${invalidChannelId}**. Please try again. You can also say **back** or **cancel**.`);
-      }
-
-      return function() { return tryApplyChannelSetting(...arguments, channelIds) };
-    }
-  }
-
-  while (true) {
-    const response = monochrome.waitForMessage(
-      INPUT_TIMEOUT_MS,
-      (candidateMsg) => msgContextMatches(candidateMsg, commanderMsg),
-    );
-
-    const lowercaseContent = response.content.toLowerCase();
-    if (lowercaseContent === 'this server') {
-      return tryApplyServerSetting;
-    }
-    if (lowercaseContent === 'this channel') {
-
-    }
-  }
-}
-
 async function tryApplySetting(monochrome, commanderMsg, settingNode, newSettingValue) {
   const userIsServerAdmin = monochrome.userIsServerAdmin(msg);
-  if (!settingNode.userSetting && !userIsServerAdmin) {
+  const canSetChannel = userIsServerAdmin && settingNode.channelSetting;
+  const canSetServer = userIsServerAdmin && settingNode.serverSetting;
+  const canSetSelf = settingNode.userSetting;
+
+  if (!canSetSelf && !canSetChannel && !canSetServer && !userIsServerAdmin) {
     return commanderMsg.channel.createMessage('Only a server admin can change that setting. The settings menu is now closed.');
   }
 
-  let updateSettingDelegate;
-  if (settingNode.userSetting && !settingNode.channelSetting && !settingNode.serverSetting) {
-    updateSettingDelegate = tryApplyUserSetting;
-  }
-  if (settingNode.serverSetting && !settingNode.channelSetting && !settingNode.userSetting) {
-    updateSettingDelegate = tryApplyServerSetting;
-  }
-  if (settingNode.channelSetting && !settingNode.serverSetting && !settingNode.userSetting) {
-    updateSettingDelegate = tryApplyChannelSetting;
+  if (canSetSelf && !canSetChannel && !canSetServer) {
+    return tryApplyUserSetting;
   }
 
-  if (!updateSettingDelegate) {
+  if (canSetServer && !canSetChannel && !canSetSelf) {
+    return tryApplyServerSetting;
+  }
 
+  while (true) {
+    if (canSetServer && canSetChannel && canSetSelf) {
+      await commanderMsg.channel.createMessage('Where should the new setting apply? You can say **me**, **this server**, **this channel**, or list channels, for example: **#bot #quiz1 #quiz2**. You can also say **back** or **cancel**.');
+    } else if (canSetServer && canSetSelf) {
+      await commanderMsg.channel.createMessage('Where should the new setting apply? You can say **me** or **this server**');
+    } else if (canSetChannel && canSetServer) {
+      await commanderMsg.channel.createMessage('Where should the new setting apply? You can say **this server**, **this channel**, or list channels, for example: **#bot #quiz1 #quiz2**. You can also say **back** or **cancel**.');
+    } else if (canSetChannel && canSetSelf) {
+      await commanderMsg.channel.createMessage('Where should the new setting apply? You can say **me**, **this channel**, or list channels, for example: **#bot #quiz1 #quiz2**. You can also say **back** or **cancel**.');
+    } else if (canSetChannel) {
+      await commanderMsg.channel.createMessage('Where should the new setting apply? You can say **this channel**, or list channels, for example: **#bot #quiz1 #quiz2**. You can also say **back** or **cancel**.');
+    } else {
+      assert.fail('Unexpected branch');
+    }
+
+    const response = await monochrome.waitForMessage(
+      INPUT_TIMEOUT_MS,
+      candidateMsg => msgContextMatches(commanderMsg, candidateMsg),
+    ).content.toLowerCase();
+
+    const handledCanceled = await tryHandleCancel(commanderMsg, response);
+    if (handledCanceled) {
+      return handledCanceled;
+    }
+
+    const handledBack = await tryHandleBack(monochrome, commanderMsg, response, node);
+    if (handledBack) {
+      return handledBack;
+    }
+
+    if (response === 'this server') {
+      if (canSetServer) {
+        return tryApplyServerSetting;
+      }
+
+      if (settingNode.serverSetting) {
+        await msg.channel.createMessage('Only a server admin can set that setting server-wide, please try again.');
+      } else {
+        await msg.channel.createMessage('That setting cannot be set server-wide. Please try again.');
+      }
+    } else if (response === 'me') {
+      if (canSetSelf) {
+        return tryApplyUserSetting;
+      }
+
+      await msg.channel.createMessage('That setting cannot be set as a user setting. Please try again.');
+    } else if (response === 'this channel') {
+      if (canSetChannel) {
+        return function() {
+          return tryApplyChannelSetting(...arguments, [commanderMsg.channel.id]);
+        };
+      }
+
+      if (settingNode.channelSetting) {
+        await msg.channel.createMessage('Only a server admin can set that setting on a channel, please try again.');
+      } else {
+        await msg.channel.createMessage('That setting cannot be set on a channel. Please try again.');
+      }
+    } else {
+      const channelIds = response.split(' ')
+        .filter(s => s.trim())
+        .map(s => s.replace(/<#(.*?)>/, (match, group1) => group1));
+      
+      const invalidChannelId = getInvalidChannelId(channelIds, commanderMsg);
+      if (canSetChannel && invalidChannelId) {
+        await msg.channel.createMessage(`I didn't find a channel called #<${invalidChannelId}>. Please try again.`);
+      } else if (canSetChannel) {
+        return tryApplyChannelSetting(...arguments, channelIds);
+      } else if (settingNode.channelSetting) {
+        await msg.channel.createMessage('Only a server admin can set that setting on a channel, please try again.');
+      } else {
+        await msg.channel.createMessage('That setting cannot be set on a channel. Please try again.');
+      }
+    }
   }
 }
 
 function tryHandleCancel(commanderMsg, responseContent) {
-  if (responseContent === 'cancel') {
+  if (responseContent.toLowerCase() === 'cancel') {
     return commanderMsg.channel.createMessage('The settings menu has been closed.');
   }
 
@@ -273,7 +244,7 @@ function tryHandleCancel(commanderMsg, responseContent) {
 }
 
 function tryHandleBack(monochrome, commanderMsg, responseContent, node) {
-  if (responseContent === 'back') {
+  if (responseContent.toLowerCase() === 'back') {
     if (node.parent) {
       return showCategoryNode(monochrome, commanderMsg, node.parent);
     } else {
@@ -336,8 +307,8 @@ async function showCategoryNode(monochrome, commanderMsg, node) {
     const childIndex = childIndexFromString(candidateMsg.content);
     return msgContextMatches(candidateMsg, commanderMsg)
       && (children[childIndex]
-          || candidateMsg.content === 'cancel'
-          || candidateMsg.content === 'back');
+        || candidateMsg.content === 'cancel'
+        || candidateMsg.content === 'back');
   });
 
   const handledCanceled = await tryHandleCancel(commanderMsg, response.content);
